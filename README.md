@@ -1,4 +1,3 @@
-
 # HelloID-Conn-Prov-Target-Microsoft-Entra-ID
 
 > [!IMPORTANT]
@@ -18,6 +17,7 @@
     - [Supported Group Types](#supported-group-types)
     - [Managing Permissions in Teams](#managing-permissions-in-teams)
     - [Creating Guest Accounts](#creating-guest-accounts)
+    - [Inviting Guest Accounts](#inviting-guest-accounts)
     - [Handling Null Values in Field Mapping](#handling-null-values-in-field-mapping)
       - [Example:](#example)
   - [Introduction](#introduction)
@@ -34,6 +34,7 @@
   - [HelloID docs](#helloid-docs)
 
 ## Requirements
+
 1. **HelloID Environment**:
    - Set up your _HelloID_ environment.
    - Install the _HelloID_ Provisioning agent (cloud or on-prem).
@@ -45,60 +46,83 @@
        - `Group.ReadWrite.All`: Read and write all groups in an organization’s directory.
        - `GroupMember.ReadWrite.All`: Read and write all group memberships.
        - `UserAuthenticationMethod.ReadWrite.All`: Read and write all users’ authentication methods.
+       - `User.Invite.All`: Invite guest users to the organization.
    - Create access credentials for your app:
      - Create a **client secret** for your app.
 
 ## Remarks
+
 ### Account Creation Limitations
+
 - The [Graph API](https://learn.microsoft.com/en-us/graph/api/user-post-users?view=graph-rest-1.0&tabs=http) has limitations when creating accounts. As a result, accounts may be created without all attributes. Since the correlation value is mandatory, HelloID can correlate the account when retrying the action.
 
 ### Supported Group Types
-- The [Microsoft Graph API](https://docs.microsoft.com/en-us/graph/api/resources/groups-overview?view=graph-rest-1.0) exclusively supports  Microsoft 365 and Security groups. Mail-enabled security groups and Distribution groups cannot be managed via this API. To manage these types of groups, use the [Exchange Online connector](https://github.com/Tools4everBV/HelloID-Conn-Prov-Target-ExchangeOnline).
+
+- The [Microsoft Graph API](https://docs.microsoft.com/en-us/graph/api/resources/groups-overview?view=graph-rest-1.0) exclusively supports Microsoft 365 and Security groups. Mail-enabled security groups and Distribution groups cannot be managed via this API. To manage these types of groups, use the [Exchange Online connector](https://github.com/Tools4everBV/HelloID-Conn-Prov-Target-ExchangeOnline).
 
 ### Managing Permissions in Teams
+
 - The script for dynamically managing permissions in Teams is similar to that for Groups, with an added filter for Teams-enabled groups. This is because a Team is inherently an M365 group, allowing us to manage its members within the group context rather than within Teams itself.
 
 ### Creating Guest Accounts
-- Direct creation of Microsoft Entra ID Guest accounts (with login names under the tenant domain) is only supported and preferred. "Invite as Guest" is not supported.
+
+- Direct creation of Microsoft Entra ID Guest accounts (with login names under the tenant domain) is preferred.
 - By specifying the `userType` as 'Guest' in the mapping, Guest accounts with login names under the tenant domain can be created effortlessly.
 
-### Authentication Methods 
+### Inviting Guest Accounts
+
+- "Invite as Guest" is supported by using a separate targetconnector.
+- Use the create-script and the fieldmapping from the `guestInvite` folder. The orginal config and other event scripts can be used from the original connector.
+- Manager can be set of an invited guest but is not based on a managerreference. The manager is searched by the corresponding employeeid, cause mostly the managerreference is not available as a `GuestInvited` account.
+- User credentials and e-mailaddress are based on an external e-mailaddress of the employee
+
+### Authentication Methods
+
 - Granting and revoking `email` and `phone` authentication methods are supported.
 - Chance mapping in the `grantPermissions.ps1` according to the HelloID person model.
 - Configure `OnlySetWhenEmpty` and `RemoveWhenRevokingEntitlement` settings in `permissions.ps1` if needed.
   - Revoking authentication methods can give issues when the default method is revoking before others. This is the reason that our best practice is setting this value to `$false`.
 
 ### Handling Null Values in Field Mapping
+
 - The script filters out all field mappings with the value `$null`. If the value in the HelloID person model is `$null`, it is also filtered out. If this behavior is not desired, change the mapping to complex and ensure you return a string with a `space` or `empty` when the value is `$null`. This way, the value is correctly handled by the script.
 
 #### Example:
+
 ```javascript
 function getCompanyName() {
   let companyName = Person.PrimaryContract.Employer.Name;
   if (companyName === null) {
-    companyName = ' ';
+    companyName = " ";
   }
   return companyName;
 }
 getCompanyName();
 ```
-**
+
+\*\*
+
 ### Limitations Without Exchange Online Connector
+
 This connector is designed exclusively for Entra ID and does not integrate with Exchange Online. As a result, it has the following limitations compared to the built-in Azure AD connector:
 
 #### ProxyAddress Expansion with Aliases
+
 - It cannot expand ProxyAddress with additional aliases, which is crucial for managing multiple email addresses for a single user.
 
 > [!NOTE]
 > If the `mail` and `userPrincipalName` fields are different, the `mail` value will automatically become the primary SMTP address, and the `userPrincipalName` will be added as an alias.
 
 #### Modifying showInAddressList
+
 - It cannot modify the showInAddressList attribute, which determines whether a user appears in the global address list (GAL).
 
 #### Mailbox Creation/Activation
+
 - Mailboxes cannot be created or activated until a license is assigned, causing delays in email setup for new users.
 
 ## Introduction
+
 _HelloID-Conn-Prov-Target-Microsoft-Entra-ID_ is a _target_ connector. _Microsoft_ provides a set of REST API's that allow you to programmatically interact with its data. The Microsoft Entra ID connector uses the API endpoints listed in the table below.
 
 | Endpoint                                                                                                                                                        | Description                                |
@@ -119,13 +143,13 @@ _HelloID-Conn-Prov-Target-Microsoft-Entra-ID_ is a _target_ connector. _Microsof
 | [/v1.0/users/{id}/authentication/phoneMethods](https://learn.microsoft.com/nl-nl/graph/api/authentication-post-phonemethods?view=graph-rest-1.0&tabs=http)      | Create phoneMethod (POST)                  |
 | [/v1.0/users/{id}/authentication/phoneMethods/{id}](https://learn.microsoft.com/nl-nl/graph/api/phoneauthenticationmethod-update?view=graph-rest-1.0&tabs=http) | Update phoneAuthenticationMethod (PATCH)   |
 | [/v1.0/users/{id}/authentication/phoneMethods/{id}](https://learn.microsoft.com/nl-nl/graph/api/phoneauthenticationmethod-delete?view=graph-rest-1.0&tabs=http) | UDelete phoneAuthenticationMethod (DELETE) |
-
+| [/v1.0/invitations](https://learn.microsoft.com/en-us/graph/api/invitation-post?view=graph-rest-1.0&tabs=http)                                                  | Invite Guest user (POST)                   |
 
 The following lifecycle actions are available:
 
 | Action                                            | Description                                                                                |
 | ------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| create.ps1                                        | Create or correlate to an account                                                          |
+| create.ps1                                        | Create or correlate to an account. Separate create.ps1 available for GuestInvites          |
 | delete.ps1                                        | Delete an account                                                                          |
 | disable.ps1                                       | Disable an account                                                                         |
 | enable.ps1                                        | Enable an account                                                                          |
@@ -147,8 +171,10 @@ The following lifecycle actions are available:
 | configuration.json                                | Default _configuration.json_                                                               |
 | fieldMapping.json                                 | _fieldMapping.json_ for when using the the full account lifecycle                          |
 | fieldMapping.correlateOnly.json                   | _fieldMapping.json_ for when only using the correlation and not the full account lifecycle |
+| fieldMapping.guestInvite.json                     | _fieldMapping.json_ for when using the guestInvite functionality                           |
 
 ## Getting started
+
 By using this connector you will have the ability to seamlessly create and user accounts and groups in Microsoft Entra ID. Additionally, you can set the MFA phone or email settings.
 
 Connecting to Microsoft the Microsoft Graph API is straightforward. Simply utilize the API Key and API Secret pair.
@@ -161,6 +187,7 @@ For further details, refer to the following pages in the Microsoft Docs:
 ### Provisioning PowerShell V2 connector
 
 #### Correlation configuration
+
 The correlation configuration is used to specify which properties will be used to match an existing account within _Microsoft Entra ID_ to a person in _HelloID_.
 
 To properly setup the correlation:
@@ -169,23 +196,23 @@ To properly setup the correlation:
 
 2. Specify the following configuration:
 
-    | Setting                   | Value                             |
-    | ------------------------- | --------------------------------- |
-    | Enable correlation        | `True`                            |
-    | Person correlation field  | `PersonContext.Person.ExternalId` |
-    | Account correlation field | `employeeId`                      |
+   | Setting                   | Value                             |
+   | ------------------------- | --------------------------------- |
+   | Enable correlation        | `True`                            |
+   | Person correlation field  | `PersonContext.Person.ExternalId` |
+   | Account correlation field | `employeeId`                      |
 
 > [!IMPORTANT]
 > The account correlation field is added to the create action. If you use a different value then `employeeId`, please make sure this is support by the [graph api](https://learn.microsoft.com/en-us/graph/api/user-post-users?view=graph-rest-1.0&tabs=http)
 
-
-> [!TIP]
-> _For more information on correlation, please refer to our correlation [documentation](https://docs.helloid.com/en/provisioning/target-systems/powershell-v2-target-systems/correlation.html) pages_.
+> [!TIP] > _For more information on correlation, please refer to our correlation [documentation](https://docs.helloid.com/en/provisioning/target-systems/powershell-v2-target-systems/correlation.html) pages_.
 
 #### Field mapping
+
 The field mapping can be imported by using the _fieldMapping.json_ file.
 
 ### Connection settings
+
 The following settings are required to connect to the API.
 
 | Setting                                                        | Description                                                                                                                               | Mandatory |
@@ -193,25 +220,27 @@ The following settings are required to connect to the API.
 | App Registration Directory (tenant) ID                         | The ID to the Tenant in Microsoft Entra ID                                                                                                | Yes       |
 | App Registration Application (client) ID                       | The ID to the App Registration in Microsoft Entra ID                                                                                      | Yes       |
 | App Registration Client Secret                                 | The Client Secret to the App Registration in Microsoft Entra ID                                                                           | Yes       |
-| Invite as Guest                                                | When toggled, this connector will create Guest accounts through invitation, allowing users to log in using their invited email addresses. | No        |
 | Delete the account when revoking the entitlement               | When toggled, this delete accounts when revoking the account entitlement.                                                                 | No        |
 | Set primary manager when an account is created                 | When toggled, this connector will calculate and set the manager upon creating an account.                                                 | No        |
 | Update manager when the account updated operation is performed | When toggled, this connector will calculate and set the manager upon updating an account.                                                 | No        |
 | IsDebug                                                        | When toggled, extra logging is shown. Note that this is only meant for debugging, please switch this off when in production.              | No        |
 
-
 ## Connector setup
+
 ### Application Registration
+
 The first step to connect to the Graph API and make requests is to register a new **Microsoft Entra ID Application**. This application will be used to connect to the API and manage permissions.
 
 Follow these steps:
 
 1. **Navigate to App Registrations**:
+
    - Go to the Microsoft Entra ID Portal.
    - Navigate to **Microsoft Entra ID** > **App registrations**.
    - Click on **New registration**.
 
 2. **Register the Application**:
+
    - **Name**: Enter a name for your application (e.g., "HelloID PowerShell").
    - **Supported Account Types**: Choose who can use this application (e.g., "Accounts in this organizational directory only").
    - **Redirect URI**: Choose the platform as `Web` and enter a redirect URI (e.g., `http://localhost`).
@@ -222,6 +251,7 @@ Follow these steps:
 For more detailed instructions, please see the official Microsoft documentation: [Quickstart: Register an app in the Microsoft identity platform](https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-register-app?tabs=certificate).
 
 ### Configuring App Permissions
+
 Next, configure the necessary API permissions for your Microsoft Entra ID application. For this connector, we use the **Microsoft Graph API**.
 
 Follow these steps:
@@ -234,21 +264,25 @@ Follow these steps:
    - `Group.ReadWrite.All`: Read and write all groups in an organization’s directory.
    - `GroupMember.ReadWrite.All`: Read and write all group memberships.
    - `UserAuthenticationMethod.ReadWrite.All`: Read and write all users’ authentication methods.
+   - `User.Invite.All`: Invite guest users to the organization.
 5. Click **Add permissions**.
 6. If required, click on **Grant admin consent for [Your Tenant]** to grant the necessary permissions.
 
 For more detailed instructions, please see the official Microsoft documentation: [Quickstart: Configure a client application to access a web API](https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-configure-app-access-web-apis).
 
 ### Authentication and Authorization
+
 To authenticate to the Graph API using the Authorization Code grant type, you need to obtain the necessary credentials. We recommend using the Client secret.
 
 Follow these steps:
 
 1. **Get the Tenant ID**:
+
    - In the Microsoft Entra ID Portal, go to **Azure Active Directory** > **Overview**.
    - Copy the **Tenant ID** from the Overview page.
 
 2. **Get the Client ID**:
+
    - Go to the Microsoft Entra ID Portal.
    - Navigate to **Azure Active Directory** > **App registrations**.
    - Select your application and copy the **Application (client) ID** value.
@@ -264,11 +298,11 @@ Follow these steps:
 For more detailed instructions, please see the official Microsoft documentation: [Add credentials](https://learn.microsoft.com/en-us/graph/auth-register-app-v2#add-credentials).
 
 ## Getting help
-> [!TIP]
-> _For more information on how to configure a HelloID PowerShell connector, please refer to our [documentation](https://docs.helloid.com/en/provisioning/target-systems/powershell-v2-target-systems.html) pages_.
 
-> [!TIP]
->  _If you need help, feel free to ask questions on our [forum](https://forum.helloid.com)_.
+> [!TIP] > _For more information on how to configure a HelloID PowerShell connector, please refer to our [documentation](https://docs.helloid.com/en/provisioning/target-systems/powershell-v2-target-systems.html) pages_.
+
+> [!TIP] > _If you need help, feel free to ask questions on our [forum](https://forum.helloid.com)_.
 
 ## HelloID docs
+
 The official HelloID documentation can be found at: https://docs.helloid.com/
