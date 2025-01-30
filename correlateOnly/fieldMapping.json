@@ -18,16 +18,16 @@
       ]
     },
     {
-      "Name": "userPrincipalName",
-      "Description": "[Required] The user principal name (UPN) of the user. The UPN is an Internet-style sign-in name for the user based on the Internet standard RFC 822. By convention, this should map to the user's email name. The general format is alias@domain, where the domain must be present in the tenant's collection of verified domains.\nNOTE: This property can't contain accent characters. Only the following characters are allowed A - Z, a - z, 0 - 9, ' . - _ ! # ^ ~.",
+      "Name": "employeeId",
+      "Description": "[Required] The employee identifier assigned to the user by the organization.\\nThe maximum length is 16 characters.\nUsed as Correlation Key.",
       "Type": "Text",
       "MappingActions": [
         {
           "MapForActions": [
             "Create"
           ],
-          "MappingMode": "Complex",
-          "Value": "\"function getUserPrincipalName() {\\r\\n    let userPrincipalName = Person.Accounts.MicrosoftActiveDirectory.userPrincipalName;\\r\\n\\r\\n    return userPrincipalName;\\r\\n}\\r\\n\\r\\ngetUserPrincipalName()\"",
+          "MappingMode": "Field",
+          "Value": "\"Person.ExternalId\"",
           "UsedInNotifications": false,
           "StoreInAccountData": true
         }

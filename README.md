@@ -169,11 +169,11 @@ To properly setup the correlation:
 
 2. Specify the following configuration:
 
-    | Setting                   | Value                             |
-    | ------------------------- | --------------------------------- |
-    | Enable correlation        | `True`                            |
-    | Person correlation field  | `PersonContext.Person.ExternalId` |
-    | Account correlation field | `employeeId`                      |
+    | Setting                   | Value        |
+    | ------------------------- | ------------ |
+    | Enable correlation        | `True`       |
+    | Person correlation field  | `ExternalId` |
+    | Account correlation field | `employeeId` |
 
 > [!IMPORTANT]
 > The account correlation field is added to the create action. If you use a different value then `employeeId`, please make sure this is support by the [graph api](https://learn.microsoft.com/en-us/graph/api/user-post-users?view=graph-rest-1.0&tabs=http)

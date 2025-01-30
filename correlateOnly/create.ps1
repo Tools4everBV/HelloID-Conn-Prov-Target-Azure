@@ -3,16 +3,9 @@
 # Correlate to account
 # PowerShell V2
 #################################################
+
 # Enable TLS1.2
 [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12
-
-# Set debug logging
-switch ($actionContext.Configuration.isDebug) {
-    $true { $VerbosePreference = "Continue" }
-    $false { $VerbosePreference = "SilentlyContinue" }
-}
-$InformationPreference = "Continue"
-$WarningPreference = "Continue"
 
 #region functions
 function Resolve-MicrosoftGraphAPIError {
@@ -66,81 +59,7 @@ function Resolve-MicrosoftGraphAPIError {
         catch {
             $httpErrorObj.FriendlyMessage = $httpErrorObj.ErrorDetails
         }
-
-        Write-Output $httpErrorObj
-    }
-}
-
-function New-AuthorizationHeaders {
-    [CmdletBinding()]
-    [OutputType([System.Collections.Generic.Dictionary[[String], [String]]])]
-    param(
-        [parameter(Mandatory)]
-        [string]
-        $TenantId,
-
-        [parameter(Mandatory)]
-        [string]
-        $ClientId,
-
-        [parameter(Mandatory)]
-        [string]
-        $ClientSecret
-    )
-    try {
-        Write-Verbose "Creating Access Token"
-        $baseUri = "https://login.microsoftonline.com/"
-        $authUri = $baseUri + "$TenantId/oauth2/token"
-    
-        $body = @{
-            grant_type    = "client_credentials"
-            client_id     = "$ClientId"
-            client_secret = "$ClientSecret"
-            resource      = "https://graph.microsoft.com"
-        }
-    
-        $Response = Invoke-RestMethod -Method POST -Uri $authUri -Body $body -ContentType 'application/x-www-form-urlencoded'
-        $accessToken = $Response.access_token
-    
-        #Add the authorization header to the request
-        Write-Verbose 'Adding Authorization headers'
-
-        $headers = [System.Collections.Generic.Dictionary[[String], [String]]]::new()
-        $headers.Add('Authorization', "Bearer $accesstoken")
-        $headers.Add('Accept', 'application/json')
-        $headers.Add('Content-Type', 'application/json')
-        # Needed to filter on specific attributes (https://docs.microsoft.com/en-us/graph/aad-advanced-queries)
-        $headers.Add('ConsistencyLevel', 'eventual')
-
-        Write-Output $headers  
-    }
-    catch {
-        throw $_
-    }
-}
-
-function Resolve-HTTPError {
-    [CmdletBinding()]
-    param (
-        [Parameter(Mandatory,
-            ValueFromPipeline
-        )]
-        [object]$ErrorObject
-    )
-    process {
-        $httpErrorObj = [PSCustomObject]@{
-            FullyQualifiedErrorId = $ErrorObject.FullyQualifiedErrorId
-            MyCommand             = $ErrorObject.InvocationInfo.MyCommand
-            RequestUri            = $ErrorObject.TargetObject.RequestUri
-            ScriptStackTrace      = $ErrorObject.ScriptStackTrace
-            ErrorMessage          = ''
-        }
-        if ($ErrorObject.Exception.GetType().FullName -eq 'Microsoft.Powershell.Commands.HttpResponseException') {
-            $httpErrorObj.ErrorMessage = $ErrorObject.ErrorDetails.Message
-        }
-        elseif ($ErrorObject.Exception.GetType().FullName -eq 'System.Net.WebException') {
-            $httpErrorObj.ErrorMessage = [System.IO.StreamReader]::new($ErrorObject.Exception.Response.GetResponseStream()).ReadToEnd()
-        }
+        
         Write-Output $httpErrorObj
     }
 }
@@ -153,10 +72,18 @@ try {
     $correlationValue = $actionContext.CorrelationConfiguration.accountFieldValue
 
     # Define account object
-    $account = [PSCustomObject]$actionContext.Data
+    $account = [PSCustomObject]$actionContext.Data.PsObject.Copy()
 
     # Define properties to query
     $accountPropertiesToQuery = @("id") + $account.PsObject.Properties.Name | Select-Object -Unique
+
+    # Remove properties of account object with null-values
+    $account.PsObject.Properties | ForEach-Object {
+        # Remove properties with null-values
+        if ($_.Value -eq $null) {
+            $account.PsObject.Properties.Remove("$($_.Name)")
+        }
+    }
     #endRegion account
 
     #region Verify correlation configuration and properties
@@ -166,70 +93,106 @@ try {
         if ([string]::IsNullOrEmpty($correlationField)) {
             throw "Correlation is enabled but not configured correctly."
         }
-    
+
         if ([string]::IsNullOrEmpty($correlationValue)) {
             throw "The correlation value for [$correlationField] is empty. This is likely a mapping issue."
         }
     }
     else {
-        throw "Correlation is disabled while this connector only supports correlation."
+        Write-Warning "Correlation is disabled."
     }
     #endregion Verify correlation configuration and properties
 
-    #region Create authorization headers
-    $actionMessage = "creating authorization headers"
+    #region Create access token
+    $actionMessage = "creating access token"
 
-    $authorizationHeadersSplatParams = @{
-        TenantId     = $actionContext.Configuration.TenantID
-        ClientId     = $actionContext.Configuration.AppId
-        ClientSecret = $actionContext.Configuration.AppSecret
+    $createAccessTokenBody = @{
+        grant_type    = "client_credentials"
+        client_id     = $actionContext.Configuration.AppId
+        client_secret = $actionContext.Configuration.AppSecret
+        resource      = "https://graph.microsoft.com"
     }
 
-    $headers = New-AuthorizationHeaders @authorizationHeadersSplatParams
-
-    Write-Verbose "Created authorization headers. Result: $($headers | ConvertTo-Json)"
-    #endregion Create authorization headers
-
-    #region Get Microsoft Entra ID account
-    # Microsoft docs: https://learn.microsoft.com/en-us/graph/api/user-get?view=graph-rest-1.0&tabs=http
-    $actionMessage = "querying Microsoft Entra ID account"
-
-    $baseUri = "https://graph.microsoft.com/"
-    $getMicrosoftEntraIDAccountSplatParams = @{
-        Uri         = "$($baseUri)/v1.0/users?`$filter=$correlationField eq '$correlationValue'&`$select=$($accountPropertiesToQuery -join ',')"
+    $createAccessTokenSplatParams = @{
+        Uri         = "https://login.microsoftonline.com/$($actionContext.Configuration.TenantID)/oauth2/token"
         Headers     = $headers
-        Method      = "GET"
+        Body        = $createAccessTokenBody
+        Method      = "POST"
+        ContentType = "application/x-www-form-urlencoded"
         Verbose     = $false
         ErrorAction = "Stop"
     }
-    $currentMicrosoftEntraIDAccount = $null
-    $currentMicrosoftEntraIDAccount = (Invoke-RestMethod @getMicrosoftEntraIDAccountSplatParams).Value
-        
-    Write-Verbose "Queried Microsoft Entra ID account where [$($correlationField)] = [$($correlationValue)]. Result: $($currentMicrosoftEntraIDAccount | ConvertTo-Json)"
-    #endregion Get Microsoft Entra ID account
 
-    #region Account
+    $createAccessTokenResonse = Invoke-RestMethod @createAccessTokenSplatParams
+
+    Write-Information "Created access token. Expires in: $($createAccessTokenResonse.expires_in | ConvertTo-Json)"
+    #endregion Create access token
+
+    #region Create headers
+    $actionMessage = "creating headers"
+
+    $headers = @{
+        "Accept"          = "application/json"
+        "Content-Type"    = "application/json;charset=utf-8"
+        "Mwp-Api-Version" = "1.0"
+    }
+
+    Write-Information "Created headers. Result (without Authorization): $($headers | ConvertTo-Json)."
+
+    # Add Authorization after printing splat
+    $headers['Authorization'] = "Bearer $($createAccessTokenResonse.access_token)"
+    #endregion Create headers
+
+    if ($actionContext.CorrelationConfiguration.Enabled -eq $true) {
+        #region Get account
+        # API docs: https://learn.microsoft.com/en-us/graph/api/user-list?view=graph-rest-1.0&tabs=http
+        $actionMessage = "querying account where [$($correlationField)] = [$($correlationValue)]"
+
+        $getEntraIDAccountSplatParams = @{
+            Uri         = "https://graph.microsoft.com/v1.0/users?`$filter=$correlationField eq '$correlationValue'&`$select=$($accountPropertiesToQuery -join ',')"
+            Method      = "GET"
+            Verbose     = $false
+            ErrorAction = "Stop"
+        }
+
+        Write-Information "SplatParams: $($getEntraIDAccountSplatParams | ConvertTo-Json)"
+
+        # Add Headers after printing splat
+        $getEntraIDAccountSplatParams['Headers'] = $headers
+
+        $getEntraIDAccountResponse = $null
+        $getEntraIDAccountResponse = Invoke-RestMethod @getEntraIDAccountSplatParams
+        $correlatedAccount = $getEntraIDAccountResponse.Value
+
+        Write-Information "Queried account where [$($correlationField)] = [$($correlationValue)]. Result: $($correlatedAccount  | ConvertTo-Json)"
+        #endregion Get account
+    }
+    else {
+        $correlatedAccount = $null
+    }
+
     #region Calulate action
     $actionMessage = "calculating action"
-    if (($currentMicrosoftEntraIDAccount | Measure-Object).count -eq 0) {
-        $actionAccount = "NotFound"
-    }
-    elseif (($currentMicrosoftEntraIDAccount | Measure-Object).count -eq 1) {
+    if (($correlatedAccount | Measure-Object).count -eq 1) {
         $actionAccount = "Correlate"
     }
-    elseif (($currentMicrosoftEntraIDAccount | Measure-Object).count -gt 1) {
+    elseif (($correlatedAccount | Measure-Object).count -gt 1) {
         $actionAccount = "MultipleFound"
     }
+    elseif (($correlatedAccount | Measure-Object).count -eq 0) {
+        $actionAccount = "NotFound"
+    }
+
     #endregion Calulate action
-    
+
     #region Process
     switch ($actionAccount) {
         "Correlate" {
             #region Correlate account
             $actionMessage = "correlating to account"
 
-            $outputContext.AccountReference = "$($currentMicrosoftEntraIDAccount.id)"
-            $outputContext.Data = $currentMicrosoftEntraIDAccount
+            $outputContext.AccountReference = "$($correlatedAccount.id)"
+            $outputContext.Data = $correlatedAccount.PsObject.Copy()
 
             $outputContext.AuditLogs.Add([PSCustomObject]@{
                     Action  = "CorrelateAccount" # Optionally specify a different action for this audit log
@@ -257,7 +220,7 @@ try {
         "NotFound" {
             #region No account found
             $actionMessage = "correlating to account"
-        
+
             # Throw terminal error
             throw "No account found where [$($correlationField)] = [$($correlationValue)]."
             #endregion No account found
@@ -266,7 +229,6 @@ try {
         }
     }
     #endregion Process
-    #endregion Account
 }
 catch {
     $ex = $PSItem
@@ -274,12 +236,14 @@ catch {
         $($ex.Exception.GetType().FullName -eq 'System.Net.WebException')) {
         $errorObj = Resolve-MicrosoftGraphAPIError -ErrorObject $ex
         $auditMessage = "Error $($actionMessage). Error: $($errorObj.FriendlyMessage)"
-        Write-Warning "Error at Line [$($errorObj.ScriptLineNumber)]: $($errorObj.Line). Error: $($errorObj.ErrorDetails)"
+        $warningMessage = "Error at Line [$($errorObj.ScriptLineNumber)]: $($errorObj.Line). Error: $($errorObj.ErrorDetails)"
     }
     else {
         $auditMessage = "Error $($actionMessage). Error: $($ex.Exception.Message)"
-        Write-Warning "Error at Line [$($ex.InvocationInfo.ScriptLineNumber)]: $($ex.InvocationInfo.Line). Error: $($ex.Exception.Message)"
+        $warningMessage = "Error at Line [$($ex.InvocationInfo.ScriptLineNumber)]: $($ex.InvocationInfo.Line). Error: $($ex.Exception.Message)"
     }
+
+    Write-Warning $warningMessage
 
     $outputContext.AuditLogs.Add([PSCustomObject]@{
             # Action  = "" # Optional
@@ -289,10 +253,7 @@ catch {
 }
 finally {
     # Check if auditLogs contains errors, if no errors are found, set success to true
-    if ($outputContext.AuditLogs.IsError -contains $true) {
-        $outputContext.Success = $false
-    }
-    else {
+    if (-NOT($outputContext.AuditLogs.IsError -contains $true)) {
         $outputContext.Success = $true
     }
 
